@@ -13,15 +13,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useFocusEffect } from '@react-navigation/native';
 
-const METERING_MS         = 500;
-const REQUIRED_HITS       = 6;
-const MAX_STD_DEV         = 8;
-const STORAGE_KEY         = 'bruxism_events';
-const SEGMENT_DURATION_MS = 30_000;
-const WAVEFORM_BARS       = 8;
+const METERING_MS   = 100;
+const REQUIRED_HITS = 3;
+const MAX_STD_DEV   = 100;
+const STORAGE_KEY   = 'bruxism_events';
+const WAVEFORM_BARS = 8;
 
 export const THRESHOLD_KEY      = 'bruxism_threshold';
-export const DEFAULT_THRESHOLD  = -25;
+export const DEFAULT_THRESHOLD  = -40;
 export const CLIPS_DIR          = (FileSystem.documentDirectory ?? '') + 'clips/';
 
 function stdDev(values: number[]): number {
@@ -39,7 +38,6 @@ export default function Home() {
   const [hitCount, setHitCount]           = useState(0);
 
   const recordingRef       = useRef<Audio.Recording | null>(null);
-  const segmentTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consecutiveHitsRef = useRef(0);
   const dbWindowRef        = useRef<number[]>([]);
   const thresholdRef       = useRef(DEFAULT_THRESHOLD);
@@ -125,43 +123,22 @@ export default function Home() {
   async function startNewSegment() {
     if (!isActiveRef.current) return;
     try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording } = await Audio.Recording.createAsync(
         { ...Audio.RecordingOptionsPresets.LOW_QUALITY, isMeteringEnabled: true },
         onStatusUpdate,
         METERING_MS,
       );
       recordingRef.current = recording;
-      segmentTimerRef.current = setTimeout(cycleSegment, SEGMENT_DURATION_MS);
     } catch (e) {
-      console.error('세그먼트 시작 실패:', e);
+      console.error('녹음 시작 실패:', e);
     }
-  }
-
-  async function cycleSegment() {
-    if (!isActiveRef.current) return;
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    if (rec) {
-      try {
-        await rec.stopAndUnloadAsync();
-        const uri = rec.getURI();
-        if (uri) await FileSystem.deleteAsync(uri, { idempotent: true });
-      } catch (e) {
-        console.error('세그먼트 만료 처리 실패:', e);
-      }
-    }
-    await startNewSegment();
   }
 
   const saveAndRestartRef = useRef(async (_ts: string, _db: number) => {});
   saveAndRestartRef.current = async (timestamp: string, db: number) => {
     if (isSavingRef.current || !isActiveRef.current) return;
     isSavingRef.current = true;
-
-    if (segmentTimerRef.current) {
-      clearTimeout(segmentTimerRef.current);
-      segmentTimerRef.current = null;
-    }
 
     const rec = recordingRef.current;
     recordingRef.current = null;
@@ -194,7 +171,7 @@ export default function Home() {
     isSavingRef.current = false;
     setAnalysisPhase('confirmed');
     setTimeout(() => { if (isActiveRef.current) setAnalysisPhase('detecting'); }, 600);
-    await startNewSegment();
+    setTimeout(() => { startNewSegment(); }, 1000);
   };
 
   async function startRecording() {
@@ -210,10 +187,6 @@ export default function Home() {
 
   async function stopRecording() {
     isActiveRef.current = false;
-    if (segmentTimerRef.current) {
-      clearTimeout(segmentTimerRef.current);
-      segmentTimerRef.current = null;
-    }
     const rec = recordingRef.current;
     recordingRef.current = null;
     if (rec) {

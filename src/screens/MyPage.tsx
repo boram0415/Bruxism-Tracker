@@ -1,9 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Animated,
-  Dimensions,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,135 +10,40 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import { THRESHOLD_KEY, DEFAULT_THRESHOLD } from './Home';
+import { THRESHOLD_KEY } from './Home';
 
-const SLIDER_MIN   = -50;
-const SLIDER_MAX   = -10;
-const TRACK_WIDTH  = Dimensions.get('window').width - 64;
+const STORAGE_KEY      = 'bruxism_events';
+const MIN_SAMPLES      = 3;
 
-// ── 커스텀 슬라이더 (순수 JS, Expo Go 호환) ──────────────
-function ThresholdSlider({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  const toX    = (v: number) => ((v - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * TRACK_WIDTH;
-  const toValue = (x: number) =>
-    Math.round(SLIDER_MIN + (x / TRACK_WIDTH) * (SLIDER_MAX - SLIDER_MIN));
+type BruxismEvent = { timestamp: string; db: number; clipUri?: string; feedback?: 'confirmed' | 'rejected' };
 
-  const thumbX    = useRef(new Animated.Value(toX(value))).current;
-  const currentX  = useRef(toX(value));
-
-  // 외부 value 변경 시 동기화
-  useEffect(() => {
-    const x = toX(value);
-    thumbX.setValue(x);
-    currentX.current = x;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        // currentX.current는 항상 최신 위치를 가리킴
-      },
-      onPanResponderMove: (_, { dx }) => {
-        const newX = Math.max(0, Math.min(TRACK_WIDTH, currentX.current + dx));
-        thumbX.setValue(newX);
-        onChange(toValue(newX));
-      },
-      onPanResponderRelease: (_, { dx }) => {
-        currentX.current = Math.max(0, Math.min(TRACK_WIDTH, currentX.current + dx));
-      },
-    })
-  ).current;
-
-  const fillWidth = thumbX.interpolate({
-    inputRange: [0, TRACK_WIDTH],
-    outputRange: [0, TRACK_WIDTH],
-    extrapolate: 'clamp',
-  });
-
-  const thumbTranslate = thumbX.interpolate({
-    inputRange: [0, TRACK_WIDTH],
-    outputRange: [-12, TRACK_WIDTH - 12],
-    extrapolate: 'clamp',
-  });
-
-  return (
-    <View style={sliderStyles.wrapper}>
-      {/* 트랙 */}
-      <View style={sliderStyles.track}>
-        <Animated.View style={[sliderStyles.fill, { width: fillWidth }]} />
-      </View>
-      {/* 썸 */}
-      <Animated.View
-        style={[
-          sliderStyles.thumb,
-          { transform: [{ translateX: thumbTranslate }] },
-        ]}
-        {...pan.panHandlers}
-      />
-    </View>
-  );
-}
-
-const sliderStyles = StyleSheet.create({
-  wrapper: {
-    height: 40,
-    justifyContent: 'center',
-    width: TRACK_WIDTH,
-    alignSelf: 'center',
-  },
-  track: {
-    height: 6,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  fill: {
-    height: 6,
-    backgroundColor: '#4f46e5',
-    borderRadius: 3,
-  },
-  thumb: {
-    position: 'absolute',
-    top: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#4f46e5',
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-});
-
-// ── 메인 화면 ────────────────────────────────────────────
 export default function MyPage() {
-  const [email, setEmail]         = useState('');
-  const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
+  const [email, setEmail]                       = useState('');
+  const [confirmedCount, setConfirmedCount]     = useState(0);
+  const [calibratedDb, setCalibratedDb]         = useState<number | null>(null);
 
-  // 이메일 + threshold 로딩
   useFocusEffect(useCallback(() => {
     supabase.auth.getUser().then(({ data }) => {
       setEmail(data.user?.email ?? '');
     });
-    AsyncStorage.getItem(THRESHOLD_KEY).then(val => {
-      setThreshold(val !== null ? Number(val) : DEFAULT_THRESHOLD);
+
+    AsyncStorage.getItem(STORAGE_KEY).then(async raw => {
+      const events: BruxismEvent[] = raw ? JSON.parse(raw) : [];
+      const confirmedDbs = events
+        .filter(e => e.feedback === 'confirmed')
+        .map(e => e.db);
+
+      setConfirmedCount(confirmedDbs.length);
+
+      if (confirmedDbs.length >= MIN_SAMPLES) {
+        const avg = Math.round(confirmedDbs.reduce((a, b) => a + b, 0) / confirmedDbs.length);
+        setCalibratedDb(avg);
+        await AsyncStorage.setItem(THRESHOLD_KEY, String(avg));
+      } else {
+        setCalibratedDb(null);
+      }
     });
   }, []));
-
-  // 슬라이더 값이 바뀔 때마다 AsyncStorage에 저장
-  async function handleThresholdChange(v: number) {
-    setThreshold(v);
-    await AsyncStorage.setItem(THRESHOLD_KEY, String(v));
-  }
 
   async function handleLogout() {
     Alert.alert('로그아웃', '로그아웃 하시겠습니까?', [
@@ -157,17 +59,13 @@ export default function MyPage() {
     ]);
   }
 
-  // 민감도 레이블 (낮음/보통/높음)
-  const sensitivityLabel =
-    threshold >= -20 ? '높음 (많이 잡힘)' :
-    threshold >= -35 ? '보통' :
-    '낮음 (잘 안 잡힘)';
+  const isCalibrated = calibratedDb !== null;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>마이페이지</Text>
 
-      {/* 계정 섹션 */}
+      {/* 계정 */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>계정</Text>
         <View style={styles.card}>
@@ -176,24 +74,42 @@ export default function MyPage() {
         </View>
       </View>
 
-      {/* 민감도 설정 섹션 */}
+      {/* 패턴 학습 */}
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>감지 민감도 설정</Text>
-        <View style={[styles.card, { paddingBottom: 20 }]}>
-          <View style={styles.thresholdRow}>
-            <Text style={styles.cardKey}>임계값</Text>
-            <Text style={styles.thresholdValue}>{threshold} dBFS</Text>
-            <Text style={styles.sensitivityBadge}>{sensitivityLabel}</Text>
-          </View>
-
-          <View style={{ marginTop: 16 }}>
-            <ThresholdSlider value={threshold} onChange={handleThresholdChange} />
-          </View>
-
-          <View style={styles.sliderLabels}>
-            <Text style={styles.sliderLabelLeft}>낮은 감도{'\n'}(잘 안 잡힘)</Text>
-            <Text style={styles.sliderLabelRight}>높은 감도{'\n'}(많이 잡힘)</Text>
-          </View>
+        <Text style={styles.sectionLabel}>나의 이갈이 패턴</Text>
+        <View style={[styles.card, styles.calibrationCard]}>
+          {isCalibrated ? (
+            <>
+              <View style={styles.calibrationBadge}>
+                <Text style={styles.calibrationBadgeText}>맞춤 설정 완료</Text>
+              </View>
+              <Text style={styles.calibrationTitle}>당신의 감지 기준</Text>
+              <Text style={styles.calibrationValue}>{calibratedDb} dBFS</Text>
+              <Text style={styles.calibrationMeta}>
+                총 {confirmedCount}개 샘플 기반 · 피드백이 쌓일수록 자동 업데이트됩니다
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.calibrationTitle}>패턴 분석 중...</Text>
+              <View style={styles.dotsRow}>
+                {[0, 1, 2].map(i => (
+                  <View
+                    key={i}
+                    style={[styles.dot, i < confirmedCount && styles.dotFilled]}
+                  />
+                ))}
+              </View>
+              <Text style={styles.calibrationProgress}>
+                {confirmedCount}/{MIN_SAMPLES}개 수집됨
+              </Text>
+              <Text style={styles.calibrationHint}>
+                리포트 화면에서 녹음 클립을 듣고{'\n'}
+                "이갈이 맞음 ✅"을 눌러주세요.{'\n'}
+                {MIN_SAMPLES}개가 모이면 맞춤 기준이 자동 설정됩니다.
+              </Text>
+            </>
+          )}
         </View>
       </View>
 
@@ -210,7 +126,10 @@ const styles = StyleSheet.create({
   content:    { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 40 },
   title:      { fontSize: 24, fontWeight: '700', color: '#1a1a2e', marginBottom: 28 },
   section:    { marginBottom: 24 },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#aaa', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' },
+  sectionLabel: {
+    fontSize: 12, fontWeight: '600', color: '#aaa',
+    letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase',
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -222,19 +141,28 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  cardKey:          { fontSize: 13, color: '#888', marginBottom: 4 },
-  cardValue:        { fontSize: 15, color: '#1a1a2e', fontWeight: '500' },
-  thresholdRow:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  thresholdValue:   { fontSize: 18, fontWeight: '700', color: '#4f46e5' },
-  sensitivityBadge: { fontSize: 12, color: '#888', marginLeft: 'auto' as any },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    paddingHorizontal: 4,
+  cardKey:   { fontSize: 13, color: '#888', marginBottom: 4 },
+  cardValue: { fontSize: 15, color: '#1a1a2e', fontWeight: '500' },
+
+  calibrationCard:       { paddingVertical: 24, alignItems: 'center' },
+  calibrationBadge: {
+    backgroundColor: '#d1fae5',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 14,
   },
-  sliderLabelLeft:  { fontSize: 11, color: '#bbb', textAlign: 'left', lineHeight: 16 },
-  sliderLabelRight: { fontSize: 11, color: '#bbb', textAlign: 'right', lineHeight: 16 },
+  calibrationBadgeText:  { fontSize: 12, color: '#065f46', fontWeight: '600' },
+  calibrationTitle:      { fontSize: 16, fontWeight: '700', color: '#1a1a2e', marginBottom: 10 },
+  calibrationValue:      { fontSize: 40, fontWeight: '800', color: '#4f46e5', marginBottom: 8 },
+  calibrationMeta:       { fontSize: 12, color: '#aaa', textAlign: 'center', lineHeight: 18 },
+
+  dotsRow:       { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  dot:           { width: 14, height: 14, borderRadius: 7, backgroundColor: '#e0e0e0' },
+  dotFilled:     { backgroundColor: '#4f46e5' },
+  calibrationProgress: { fontSize: 13, color: '#4f46e5', fontWeight: '700', marginBottom: 14 },
+  calibrationHint:     { fontSize: 13, color: '#aaa', textAlign: 'center', lineHeight: 20 },
+
   logoutButton: {
     marginTop: 8,
     paddingVertical: 16,
