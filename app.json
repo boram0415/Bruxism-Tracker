@@ -25,6 +25,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "이갈이 감지를 위해 수면 중 마이크 접근 권한이 필요합니다."
+        }
+      ]
+    ]
   }
 }
