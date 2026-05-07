@@ -79,9 +79,11 @@ export default function Home() {
           return;
         }
 
-        if (payload.stage1Pass) {
-          setAnalysisPhase('stage1_pass');
+        if (payload.durationPass) {
+          setAnalysisPhase('confirmed');
           saveEventIfNeeded(payload.dBFS);
+        } else if (payload.stage1Pass) {
+          setAnalysisPhase('stage1_pass');
         } else {
           setAnalysisPhase('detecting');
         }

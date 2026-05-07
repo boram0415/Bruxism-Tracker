@@ -19,7 +19,9 @@
       "Bash(xcodebuild -workspace bruxismtemp.xcworkspace -scheme bruxismtemp -configuration Debug -destination 'generic/platform=iOS Simulator' build)",
       "Bash(wait)",
       "Bash(git check-ignore *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }
