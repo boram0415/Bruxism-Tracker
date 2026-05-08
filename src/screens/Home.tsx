@@ -96,8 +96,8 @@ export default function Home() {
     if (isSavingRef.current || !isActiveRef.current) return;
     isSavingRef.current = true;
     try {
-      const event = { timestamp: new Date().toISOString(), db };
-      const raw   = await AsyncStorage.getItem(STORAGE_KEY);
+      const event = { timestamp: new Date().toISOString(), db, clipPath: '' };
+      const raw    = await AsyncStorage.getItem(STORAGE_KEY);
       const events = raw ? JSON.parse(raw) : [];
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...events, event]));
       setAnalysisPhase('confirmed');
@@ -107,6 +107,23 @@ export default function Home() {
     } finally {
       isSavingRef.current = false;
     }
+  }, []);
+
+  // 클립 저장 완료 시 마지막 이벤트에 경로 반영
+  useEffect(() => {
+    const sub = BruxismModule.addListener('onClipSaved', async ({ path }) => {
+      try {
+        const raw    = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const events = JSON.parse(raw);
+        if (events.length === 0) return;
+        events[events.length - 1].clipPath = path;
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+      } catch (e) {
+        console.error('클립 경로 저장 실패:', e);
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   async function startRecording() {

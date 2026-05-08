@@ -16,6 +16,6 @@
 - [x] V2-4: Stage 1 — EMA 동적 임계값 (배경소음 자동 추정, 30초 캘리브레이션)
 - [x] V2-5: Home.tsx 연동 — expo-av 완전 제거, BruxismModule 이벤트 리스너로 교체
 - [x] V2-6: Stage 2 — FFT 주파수 분석 (Accelerate.framework, 1-4kHz 비율 검증)
-- [ ] V2-7: RingBuffer — 이벤트 전후 2-3초 오디오 캡처 및 클립 저장
+- [x] V2-7: RingBuffer — 이벤트 전후 2-3초 오디오 캡처 및 클립 저장
 - [x] V2-8: DurationValidator — 0.5s~3.0s 지속시간 검증 상태머신
 - [ ] V2-9: Android Native Module (Kotlin + AudioRecord, 기기 확보 후 진행)
